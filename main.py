@@ -320,7 +320,7 @@ class RollPigPlugin(Star):
         render_weekly_summary(self._uname(event), items, img_path)
         yield event.image_result(str(img_path))
 
-    @filter.command("随机小猪")
+    @filter.command("随机小猪", alias={"随机找猪", "随机猪"})
     async def random_pig(self, event: AstrMessageEvent, arg: str = ""):
         """从 PigHub 随机获取猪猪图，最多 10 张"""
         if not await self.pighub.ensure_ready():
