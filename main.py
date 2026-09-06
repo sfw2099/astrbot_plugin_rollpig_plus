@@ -344,9 +344,10 @@ class RollPigPlugin(Star):
         if not store_mod.store.consume_force_usage(uid):
             yield event.plain_result("【加急生火】今天已经用过了，明天再来吧。")
             return
+        target_name = await self._get_group_member_name(event, group_id, target_id)
         target_pig_id = store_mod.store.get_daily_roll(target_id)
         if not target_pig_id:
-            yield event.plain_result(f"【{target_id}】今天还没抽猪，没法下嘴！")
+            yield event.plain_result(f"【{target_name}】今天还没抽猪，没法下嘴！")
             return
         target_pig = self.resource_manager.pig_map.get(target_pig_id)
         if not target_pig:
@@ -355,7 +356,6 @@ class RollPigPlugin(Star):
         attacker_pig_id = store_mod.store.get_daily_roll(uid)
         attacker_pig = self.resource_manager.pig_map.get(attacker_pig_id) if attacker_pig_id else None
         attacker_name = self._uname(event)
-        target_name = f"用户{target_id}"
         outcome = build_member_roast(
             attacker_pig, target_pig, attacker_name, target_name, self.resource_manager, force=True,
         )
