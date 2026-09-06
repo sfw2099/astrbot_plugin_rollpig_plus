@@ -323,8 +323,8 @@ class RollPigPlugin(Star):
                 attacker_name=attacker_name, target_name=target_name,
                 food=outcome.food_name, group_id=group_id,
             ))
-        if outcome.event_type == "escape":
-            yield event.plain_result(outcome.plain_text or "对方逃脱了！")
+        if outcome.event_type == "escape" or not outcome.render_data:
+            yield event.plain_result(outcome.plain_text or "烧烤失败了！")
             return
         async for m in self._roast_card(event, outcome.render_data, outcome.extra_text):
             yield m
@@ -538,8 +538,8 @@ class RollPigPlugin(Star):
                 attacker_name=attacker_name, target_name=target_name,
                 food=outcome.food_name, group_id=group_id,
             ))
-        if outcome.event_type == "escape":
-            yield event.plain_result(outcome.plain_text or "对方逃脱了！")
+        if outcome.event_type == "escape" or not outcome.render_data:
+            yield event.plain_result(outcome.plain_text or "烧烤失败了！")
             return
         async for m in self._roast_card(event, outcome.render_data, outcome.extra_text):
             yield m
