@@ -209,6 +209,17 @@ class LocalStore:
                 allowed=True, charges_left=charges, max_charges=max_charges,
             )
 
+    def reset_roast_charges(self, user_id: str, max_charges: Optional[int] = None) -> None:
+        """重置烤猪充能到上限（烤箱补货成功用）。"""
+        import time
+        max_charges = int(max_charges or 2)
+        with self._lock:
+            self._load()
+            roast = self._user(user_id).setdefault("roast", {})
+            roast["charges"] = max_charges
+            roast["next_recover"] = 0
+            self._save()
+
     def consume_force_usage(self, user_id: str, date_str: Optional[str] = None) -> bool:
         """消耗每日一次的「加急生火」；当天已用则返回 False。"""
         import datetime
@@ -250,6 +261,143 @@ class LocalStore:
         daily = self._user(user_id)["daily"]
         result = {d: p for d, p in daily.items() if not start_date or d >= start_date}
         return dict(sorted(result.items()))
+
+    # ================= 预约烤猪 =================
+
+    def get_roast_reservation(self, target_id: str, date_str: str) -> Optional[dict]:
+        self._load()
+        return self._data.setdefault("reservations", {}).get(f"{target_id}|{date_str}")
+
+    def create_roast_reservation(self, *, target_id, target_name, owner_id, owner_name,
+                                 owner_pig_id, group_id, date_str) -> dict:
+        import uuid
+        with self._lock:
+            self._load()
+            key = f"{target_id}|{date_str}"
+            reservations = self._data.setdefault("reservations", {})
+            if key in reservations:
+                return reservations[key]
+            reservation = {
+                "reservation_id": str(uuid.uuid4()),
+                "date": date_str,
+                "group_id": group_id,
+                "target_id": target_id,
+                "target_name": target_name,
+                "owner_id": owner_id,
+                "owner_name": owner_name,
+                "owner_pig_id": owner_pig_id,
+                "participants": [{"user_id": owner_id, "name": owner_name}],
+                "status": "pending",
+            }
+            reservations[key] = reservation
+            self._save()
+            return reservation
+
+    def join_roast_reservation(self, target_id: str, date_str: str,
+                               user_id: str, name: str, group_id: str) -> Optional[dict]:
+        with self._lock:
+            self._load()
+            key = f"{target_id}|{date_str}"
+            reservation = self._data.setdefault("reservations", {}).get(key)
+            if not reservation:
+                return None
+            if len(reservation["participants"]) >= 12:
+                return reservation
+            if any(p["user_id"] == user_id for p in reservation["participants"]):
+                return reservation
+            reservation["participants"].append({"user_id": user_id, "name": name})
+            self._save()
+            return reservation
+
+    def complete_roast_reservation(self, target_id: str, date_str: str) -> Optional[dict]:
+        with self._lock:
+            self._load()
+            key = f"{target_id}|{date_str}"
+            reservation = self._data.setdefault("reservations", {}).get(key)
+            if not reservation:
+                return None
+            reservation["status"] = "delivered"
+            self._save()
+            return reservation
+
+    # ================= 烤箱补货 =================
+
+    def mark_group_active_user(self, group_id: str, user_id: str, date_str: Optional[str] = None) -> None:
+        import datetime
+        if not date_str:
+            date_str = datetime.date.today().isoformat()
+        with self._lock:
+            self._load()
+            active = self._data.setdefault("group_active", {}).setdefault(str(group_id), {}).setdefault(date_str, [])
+            if str(user_id) not in active:
+                active.append(str(user_id))
+            self._save()
+
+    def get_group_active_users(self, group_id: str, date_str: Optional[str] = None) -> set[str]:
+        import datetime
+        if not date_str:
+            date_str = datetime.date.today().isoformat()
+        self._load()
+        return set(self._data.setdefault("group_active", {}).get(str(group_id), {}).get(date_str, []))
+
+    def get_group_refill(self, group_id: str, date_str: Optional[str] = None) -> Optional[dict]:
+        import datetime
+        if not date_str:
+            date_str = datetime.date.today().isoformat()
+        self._load()
+        return self._data.setdefault("refills", {}).get(f"{group_id}|{date_str}")
+
+    def create_group_refill(self, *, group_id, initiator_id, initiator_name, date_str,
+                            required_votes, expires_at) -> dict:
+        import uuid
+        import datetime
+        with self._lock:
+            self._load()
+            key = f"{group_id}|{date_str}"
+            refills = self._data.setdefault("refills", {})
+            refill = {
+                "request_id": str(uuid.uuid4()),
+                "date": date_str,
+                "group_id": group_id,
+                "initiator_id": initiator_id,
+                "initiator_name": initiator_name,
+                "votes": {initiator_id: 1},
+                "status": "voting",
+                "required_votes": required_votes,
+                "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "expires_at": expires_at,
+            }
+            refills[key] = refill
+            self._save()
+            return refill
+
+    def vote_group_refill(self, group_id: str, date_str: str, user_id: str, weight: int = 1) -> Optional[dict]:
+        import datetime
+        if not date_str:
+            date_str = datetime.date.today().isoformat()
+        with self._lock:
+            self._load()
+            key = f"{group_id}|{date_str}"
+            refill = self._data.setdefault("refills", {}).get(key)
+            if not refill:
+                return None
+            refill["votes"][str(user_id)] = max(refill["votes"].get(str(user_id), 0), weight)
+            self._save()
+            return refill
+
+    def complete_group_refill(self, group_id: str, date_str: str) -> Optional[dict]:
+        import datetime
+        if not date_str:
+            date_str = datetime.date.today().isoformat()
+        with self._lock:
+            self._load()
+            key = f"{group_id}|{date_str}"
+            refill = self._data.setdefault("refills", {}).get(key)
+            if not refill:
+                return None
+            refill["status"] = "completed"
+            self._save()
+            return refill
 
 
 # 单例，由 main.py 在插件初始化时设置

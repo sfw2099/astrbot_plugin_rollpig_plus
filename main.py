@@ -29,6 +29,8 @@ from .core.roast_flow import (
 from .core.roast_manager import RoastManager
 from .core.models import RoastEvent
 import astrbot.api.message_components as Comp
+import asyncio
+import random
 
 
 @register("astrbot_plugin_rollpig_plus", "ALin", "今日小猪 Plus", "1.0.0")
@@ -70,6 +72,8 @@ class RollPigPlugin(Star):
         """抽取今天的小猪"""
         user_id = self._uid(event)
         group_id = str(event.get_group_id() or "")
+        if group_id and group_id != "None":
+            store_mod.store.mark_group_active_user(group_id, user_id)
         resolution = resolve_daily_pig(
             user_id, group_id, self.resource_manager, include_progress=True,
         )
@@ -107,6 +111,41 @@ class RollPigPlugin(Star):
                 text = extra + "\n" + text
             yield event.plain_result(text)
 
+        # 首次抽猪后结算预约（若该用户有被预约）
+        if resolution.was_auto_created:
+            await self._deliver_reservations(event, user_id, pig)
+
+    async def _deliver_reservations(self, event: AstrMessageEvent, target_id: str, target_pig: dict):
+        """目标抽猪后，结算针对他的预约烤猪（对所有参与者各烤一次）。"""
+        import datetime
+        today = datetime.date.today().isoformat()
+        reservation = store_mod.store.get_roast_reservation(target_id, today)
+        if not reservation or reservation["status"] != "pending":
+            return
+        target_name = reservation.get("target_name", f"用户{target_id}")
+        origin = getattr(event, "unified_msg_origin", None)
+        for participant in reservation["participants"]:
+            pid = participant["user_id"]
+            pname = participant["name"]
+            # 参与者今日小猪
+            attacker_pig_id = store_mod.store.get_daily_roll(pid)
+            attacker_pig = self.resource_manager.pig_map.get(attacker_pig_id) if attacker_pig_id else None
+            outcome = build_member_roast(
+                attacker_pig, target_pig, pname, target_name, self.resource_manager,
+            )
+            text = outcome.plain_text or (
+                f"🔥 {pname} 烤了【{target_name}】，出炉的是【{outcome.food_name}】！"
+            )
+            if origin:
+                try:
+                    await self.context.send_message(origin, MessageChain([Plain(text)]))
+                except Exception:
+                    pass
+            elif outcome.render_data:
+                async for m in self._roast_card(event, outcome.render_data):
+                    yield m
+        store_mod.store.complete_roast_reservation(target_id, today)
+
     @filter.command("我的猪圈")
     async def my_pigsty(self, event: AstrMessageEvent):
         """查看猪圈统计（图片渲染）"""
@@ -142,6 +181,32 @@ class RollPigPlugin(Star):
         if m:
             return m.group(1)
         return ""
+
+    async def _get_group_members(self, event: AstrMessageEvent, group_id: str) -> list[str]:
+        """获取群成员 user_id 列表。"""
+        try:
+            info = await event.bot.api.call_action(
+                "get_group_member_list", group_id=int(group_id),
+            )
+            data = info.get("data") if isinstance(info, dict) else info
+            if isinstance(data, list):
+                return [str(m.get("user_id")) for m in data if isinstance(m, dict) and m.get("user_id")]
+        except Exception:
+            pass
+        return []
+
+    async def _get_group_member_name(self, event: AstrMessageEvent, group_id: str, user_id: str) -> str:
+        """获取群成员名片/昵称。"""
+        try:
+            info = await event.bot.api.call_action(
+                "get_group_member_info", group_id=int(group_id), user_id=int(user_id),
+            )
+            data = info.get("data") if isinstance(info, dict) else info
+            if isinstance(data, dict):
+                return data.get("card") or data.get("nickname") or f"用户{user_id}"
+        except Exception:
+            pass
+        return f"用户{user_id}"
 
     async def _roast_card(self, event: AstrMessageEvent, pig_data: dict, extra: str = ""):
         """渲染并发送烤猪结果卡片。"""
@@ -180,7 +245,7 @@ class RollPigPlugin(Star):
 
     @filter.command("烤群友")
     async def roast_member(self, event: AstrMessageEvent):
-        """用魔法烤箱把群友做成烤猪"""
+        """用魔法烤箱把群友做成烤猪；目标未抽猪时建立/加入预约"""
         uid = self._uid(event)
         group_id = str(event.get_group_id() or "")
         target_id = self._extract_at_id(event)
@@ -190,7 +255,27 @@ class RollPigPlugin(Star):
         if target_id == uid:
             yield event.plain_result("对自己好一点，别自焚。请发送「今日烤猪」。")
             return
-        # 消耗烤猪充能
+        import datetime
+        today = datetime.date.today().isoformat()
+        target_name = await self._get_group_member_name(event, group_id, target_id)
+
+        # 检查是否已有预约
+        reservation = store_mod.store.get_roast_reservation(target_id, today)
+        if reservation and reservation["status"] == "pending":
+            # 加入预约（免费）
+            updated = store_mod.store.join_roast_reservation(
+                target_id, today, uid, self._uname(event), group_id,
+            )
+            if any(p["user_id"] == uid for p in updated["participants"]):
+                yield event.plain_result(
+                    f"🔥 你已加入对【{target_name}】的预约烤猪，免费添柴！"
+                    f"（当前 {len(updated['participants'])} 人，目标抽猪后统一结算）"
+                )
+            else:
+                yield event.plain_result("预约人数已满（12 人）。")
+            return
+
+        # 消耗烤猪充能（发起即时烧烤或预约主厨）
         cd = store_mod.store.consume_roast_cooldown(
             uid, cooldown_seconds=self.roast_cooldown_hours * 3600,
             max_charges=self.roast_charge_max,
@@ -205,7 +290,18 @@ class RollPigPlugin(Star):
         # 目标今日小猪
         target_pig_id = store_mod.store.get_daily_roll(target_id)
         if not target_pig_id:
-            yield event.plain_result(f"【{target_id}】今天还没抽猪，没法下嘴！")
+            # 目标未抽猪 → 建立预约（主厨已消耗充能）
+            reservation = store_mod.store.create_roast_reservation(
+                target_id=target_id, target_name=target_name,
+                owner_id=uid, owner_name=self._uname(event),
+                owner_pig_id=store_mod.store.get_daily_roll(uid) or "",
+                group_id=group_id, date_str=today,
+            )
+            yield event.plain_result(
+                f"📋 已为【{target_name}】建立预约烤猪（你是主厨）！"
+                f"其他群友可发送「烤群友 @{target_name}」免费加入添柴，"
+                f"目标抽猪后统一结算。（当前 {len(reservation['participants'])} 人）"
+            )
             return
         target_pig = self.resource_manager.pig_map.get(target_pig_id)
         if not target_pig:
@@ -215,7 +311,6 @@ class RollPigPlugin(Star):
         attacker_pig_id = store_mod.store.get_daily_roll(uid)
         attacker_pig = self.resource_manager.pig_map.get(attacker_pig_id) if attacker_pig_id else None
         attacker_name = self._uname(event)
-        target_name = f"用户{target_id}"
         outcome = build_member_roast(
             attacker_pig, target_pig, attacker_name, target_name, self.resource_manager,
         )
@@ -386,6 +481,143 @@ class RollPigPlugin(Star):
         except Exception as e:
             logger.error(f"[rollpig] 昨日卡片渲染失败: {e}")
             yield event.plain_result(f"昨天你抽到的是：{pig.get('name', '未知')}")
+
+    @filter.command("随机烤猪")
+    async def random_roast(self, event: AstrMessageEvent):
+        """从今日已抽猪的群成员中随机选目标烤"""
+        uid = self._uid(event)
+        group_id = str(event.get_group_id() or "")
+        if not group_id or group_id == "None":
+            yield event.plain_result("随机烤猪仅支持群聊~")
+            return
+        members = await self._get_group_members(event, group_id)
+        if not members:
+            yield event.plain_result("无法获取群成员列表，请稍后再试。")
+            return
+        # 今日已抽猪的成员（排除自己）
+        candidates = []
+        import datetime
+        today = datetime.date.today().isoformat()
+        for mid in members:
+            if mid == uid:
+                continue
+            if store_mod.store.get_pig_by_date(mid, today):
+                candidates.append(mid)
+        if not candidates:
+            yield event.plain_result("今天还没有群友抽猪，没人可烤！")
+            return
+        target_id = random.choice(candidates)
+        target_name = await self._get_group_member_name(event, group_id, target_id)
+        # 消耗攻击者充能
+        cd = store_mod.store.consume_roast_cooldown(
+            uid, cooldown_seconds=self.roast_cooldown_hours * 3600,
+            max_charges=self.roast_charge_max,
+        )
+        if not cd.allowed:
+            remaining = cd.remaining_seconds
+            minutes, seconds = divmod(remaining, 60)
+            hours, minutes = divmod(minutes, 60)
+            time_str = f"{hours}小时{minutes}分" if hours > 0 else f"{minutes}分{seconds}秒"
+            yield event.plain_result(f"烧烤充能恢复中！还需要 {time_str} 恢复 1 次。")
+            return
+        target_pig = self.resource_manager.pig_map.get(store_mod.store.get_daily_roll(target_id))
+        if not target_pig:
+            yield event.plain_result("目标的小猪记录存在，但资源暂时缺失，请稍后再试。")
+            return
+        attacker_pig_id = store_mod.store.get_daily_roll(uid)
+        attacker_pig = self.resource_manager.pig_map.get(attacker_pig_id) if attacker_pig_id else None
+        attacker_name = self._uname(event)
+        outcome = build_member_roast(
+            attacker_pig, target_pig, attacker_name, target_name, self.resource_manager,
+        )
+        if group_id:
+            store_mod.store.append_roast_event(RoastEvent(
+                event_type="random_roast",
+                attacker_id=uid, target_id=target_id,
+                attacker_name=attacker_name, target_name=target_name,
+                food=outcome.food_name, group_id=group_id,
+            ))
+        if outcome.event_type == "escape":
+            yield event.plain_result(outcome.plain_text or "对方逃脱了！")
+            return
+        async for m in self._roast_card(event, outcome.render_data, outcome.extra_text):
+            yield m
+
+    @filter.command("烤箱补货")
+    async def roast_refill(self, event: AstrMessageEvent, arg: str = ""):
+        """当日活跃用户发起烧烤次数补货投票"""
+        uid = self._uid(event)
+        group_id = str(event.get_group_id() or "")
+        if not group_id or group_id == "None":
+            yield event.plain_result("烤箱补货仅支持群聊~")
+            return
+        import datetime
+        today = datetime.date.today().isoformat()
+        # 发起人必须今日已抽猪
+        if not store_mod.store.get_daily_roll(uid):
+            yield event.plain_result("请先发送「今日小猪」抽猪，再发起补货。")
+            return
+        refill = store_mod.store.get_group_refill(group_id, today)
+        if refill and refill["status"] == "voting":
+            # 投票
+            weight = 1
+            if self._is_group_admin(event, group_id, uid):
+                weight = 2
+            store_mod.store.vote_group_refill(group_id, today, uid, weight)
+            total = sum(refill["votes"].values())
+            distinct = len(refill["votes"])
+            yield event.plain_result(
+                f"已投票！当前 {distinct} 人，{total} 票（需 {refill['required_votes']} 票）。"
+            )
+            return
+        # 发起补货
+        active_users = store_mod.store.get_group_active_users(group_id, today)
+        if len(active_users) < 3:
+            yield event.plain_result(f"今日活跃用户不足（当前 {len(active_users)} 人，需至少 3 人）。")
+            return
+        required_votes = max(2, (len(active_users) * 25 + 99) // 100)
+        expires_at = (datetime.datetime.now() + datetime.timedelta(minutes=10)).isoformat(timespec="seconds")
+        refill = store_mod.store.create_group_refill(
+            group_id=group_id, initiator_id=uid,
+            initiator_name=self._uname(event), date_str=today,
+            required_votes=required_votes, expires_at=expires_at,
+        )
+        yield event.plain_result(
+            f"🔋 已发起烤箱补货投票！10 分钟内达到 {required_votes} 票即可补货。"
+            f"群友发送「烤箱补货」投票（群主/管理员双票）。"
+        )
+        # 启动定时结算
+        asyncio.create_task(self._refill_timer(group_id, today))
+
+    async def _refill_timer(self, group_id: str, date_str: str):
+        """补货投票定时结算。"""
+        try:
+            await asyncio.sleep(600)
+        except asyncio.CancelledError:
+            return
+        refill = store_mod.store.get_group_refill(group_id, date_str)
+        if not refill or refill["status"] != "voting":
+            return
+        total = sum(refill["votes"].values())
+        distinct = len(refill["votes"])
+        if distinct >= 2 and total >= refill["required_votes"]:
+            store_mod.store.complete_group_refill(group_id, date_str)
+            for user_id in store_mod.store.get_group_active_users(group_id, date_str):
+                store_mod.store.reset_roast_charges(user_id, self.roast_charge_max)
+            self._refill_success = True
+        else:
+            store_mod.store.complete_group_refill(group_id, date_str)
+            self._refill_success = False
+
+    def _is_group_admin(self, event: AstrMessageEvent, group_id: str, user_id: str) -> bool:
+        """判断是否群主/管理员（用配置 admins_id）。"""
+        try:
+            admins = self.config.get("admins_id", [])
+            if str(user_id) in [str(x) for x in admins]:
+                return True
+        except Exception:
+            pass
+        return False
 
     async def terminate(self):
         logger.info("今日小猪 Plus 插件已卸载")
