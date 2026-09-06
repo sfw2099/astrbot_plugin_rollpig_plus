@@ -85,43 +85,48 @@ def render_pig_card(pig_data: dict, image_path: Optional[Path], output_path: Pat
     img = Image.new("RGB", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
-    name = str(pig_data.get("name", "未知小猪"))
-    desc = str(pig_data.get("description", "无描述"))
-    analysis = str(pig_data.get("analysis", "无解析"))
+    name = _strip_emoji(str(pig_data.get("name", "未知小猪")))
+    desc = _strip_emoji(str(pig_data.get("description", "无描述")))
+    analysis = _strip_emoji(str(pig_data.get("analysis", "无解析")))
 
-    # 头像
+    # 头像（放大 + 真正居中）
     avatar = None
     if image_path and image_path.exists():
         try:
             avatar = Image.open(str(image_path)).convert("RGBA")
         except Exception:
             avatar = None
-    avatar_size = 320
-    avatar_x = (width - avatar_size) // 2
-    avatar_y = 80
+    avatar_size = 420
+    avatar_y = 60
     if avatar:
+        # 保持比例缩放到不超过 avatar_size
         avatar.thumbnail((avatar_size, avatar_size))
-        img.paste(avatar, (avatar_x, avatar_y), mask=avatar)
+        aw, ah = avatar.size
+        # 水平+垂直居中
+        ax = (width - aw) // 2
+        ay = avatar_y + (avatar_size - ah) // 2
+        img.paste(avatar, (ax, ay), mask=avatar)
     else:
-        draw.rectangle([avatar_x, avatar_y, avatar_x + avatar_size, avatar_y + avatar_size],
+        draw.rectangle([(width - avatar_size) // 2, avatar_y,
+                        (width + avatar_size) // 2, avatar_y + avatar_size],
                        fill=(245, 245, 248), outline=(200, 200, 205), width=2)
 
     # 名称（标题字体）
     name_font = _load_font(54, bold=True, title=True)
     name_w = _text_width(draw, name, name_font)
-    draw.text(((width - name_w) // 2, avatar_y + avatar_size + 30), name, fill=(0, 0, 0), font=name_font)
+    draw.text(((width - name_w) // 2, avatar_y + avatar_size + 20), name, fill=(0, 0, 0), font=name_font)
 
     # 描述
     desc_font = _load_font(30)
     desc_w = _text_width(draw, desc, desc_font)
-    draw.text(((width - desc_w) // 2, avatar_y + avatar_size + 110), desc, fill=(85, 85, 85), font=desc_font)
+    draw.text(((width - desc_w) // 2, avatar_y + avatar_size + 100), desc, fill=(85, 85, 85), font=desc_font)
 
     # 分析（换行）
     analysis_font = _load_font(26)
     max_w = int(width * 0.85)
     lines = _wrap_text(draw, analysis, analysis_font, max_w)
     line_h = 40
-    start_y = avatar_y + avatar_size + 180
+    start_y = avatar_y + avatar_size + 170
     for i, line in enumerate(lines):
         lw = _text_width(draw, line, analysis_font)
         draw.text(((width - lw) // 2, start_y + i * line_h), line, fill=(51, 51, 51), font=analysis_font)
