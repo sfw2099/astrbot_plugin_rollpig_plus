@@ -204,9 +204,12 @@ class RollPigPlugin(Star):
             )
             data = info.get("data") if isinstance(info, dict) else info
             if isinstance(data, dict):
-                return data.get("card") or data.get("nickname") or f"用户{user_id}"
-        except Exception:
-            pass
+                name = data.get("card") or data.get("nickname")
+                if name:
+                    return str(name)
+            logger.warning(f"[rollpig] 获取群成员信息返回结构异常: group={group_id} user={user_id} info={info}")
+        except Exception as e:
+            logger.warning(f"[rollpig] 获取群成员昵称失败: group={group_id} user={user_id} err={e}")
         return f"用户{user_id}"
 
     async def _roast_card(self, event: AstrMessageEvent, pig_data: dict, extra: str = ""):
