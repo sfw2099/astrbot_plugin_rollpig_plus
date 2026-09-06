@@ -159,3 +159,36 @@ def render_pigsty_summary(summary: str, user_name: str, output_path: Path) -> Pa
 
     img.save(str(output_path), "PNG")
     return output_path
+
+
+def render_help(commands: list[tuple[str, str]], output_path: Path) -> Path:
+    """渲染小猪指令图鉴长图。commands 为 [(指令, 说明)]。"""
+    width = 760
+    pad = 30
+    header_h = 80
+    row_h = 52
+    cmd_font = _load_font(26, bold=True)
+    desc_font = _load_font(22)
+    title_font = _load_font(38, bold=True, title=True)
+
+    rows = len(commands)
+    height = pad + header_h + rows * row_h + pad
+
+    img = Image.new("RGB", (width, height), (250, 250, 252))
+    draw = ImageDraw.Draw(img)
+
+    draw.text((width // 2, 18), "小猪指令图鉴", fill=(40, 40, 40), font=title_font, anchor="mt")
+
+    y = pad + header_h
+    for cmd, desc in commands:
+        cmd = _strip_emoji(cmd)
+        desc = _strip_emoji(desc)
+        draw.rounded_rectangle([pad, y, width - pad, y + row_h - 8], radius=8,
+                               fill=(255, 255, 255), outline=(210, 210, 215), width=1)
+        draw.text((pad + 14, y + (row_h - 8) // 2), cmd, fill=(200, 100, 40), font=cmd_font, anchor="lm")
+        cw = _text_width(draw, cmd, cmd_font)
+        draw.text((pad + 24 + cw, y + (row_h - 8) // 2), "—— " + desc, fill=(100, 100, 100), font=desc_font, anchor="lm")
+        y += row_h
+
+    img.save(str(output_path), "PNG")
+    return output_path

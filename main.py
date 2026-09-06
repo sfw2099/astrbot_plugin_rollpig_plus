@@ -18,7 +18,7 @@ from .core.roll_flow import (
     build_pigsty_growth_summary,
     RECORDED_PIG_RESOURCE_MISSING_TEXT,
 )
-from .core.card_renderer import render_pig_card, render_pigsty_summary, _init_font_dir
+from .core.card_renderer import render_pig_card, render_pigsty_summary, render_help, _init_font_dir
 from .core.catalog_renderer import render_catalog, render_weekly_summary
 from .core.pighub_service import PigHubService, build_image_url
 from .core.roast_flow import (
@@ -618,6 +618,27 @@ class RollPigPlugin(Star):
         except Exception:
             pass
         return False
+
+    @filter.command("带猪", alias={"小猪帮助", "帮助"})
+    async def pig_help(self, event: AstrMessageEvent):
+        """返回小猪指令图鉴图片"""
+        commands = [
+            ("今日小猪 / 今天是什么小猪", "抽取今天的小猪"),
+            ("我的猪圈", "查看猪圈统计"),
+            ("今日烤猪", "把自己的今日小猪做成料理"),
+            ("烤群友 @目标", "用魔法烤箱烤群友"),
+            ("加急生火 @目标", "每日一次强制成功烤群友"),
+            ("小猪图鉴", "生成图片版收藏图鉴"),
+            ("本周小猪", "生成本周猪猪总结长图"),
+            ("随机小猪 [数量]", "从 PigHub 随机获取猪猪图"),
+            ("找猪 关键词", "按关键词搜索 PigHub 猪图"),
+            ("昨日小猪", "查看昨天抽到的小猪"),
+            ("随机烤猪", "从今日已抽猪的群成员随机选目标烤"),
+            ("烤箱补货", "当日活跃用户发起烧烤次数补货投票"),
+        ]
+        img_path = self.plugin_data_dir / "rollpig_help.png"
+        render_help(commands, img_path)
+        yield event.image_result(str(img_path))
 
     async def terminate(self):
         logger.info("今日小猪 Plus 插件已卸载")
