@@ -1,0 +1,20 @@
+{
+    "roast_cooldown_hours": {
+        "title": "烤猪冷却时间(小时)",
+        "description": "普通烤群友冷却时长",
+        "type": "int",
+        "default": 8
+    },
+    "roast_charge_max": {
+        "title": "烤猪最大储存次数",
+        "description": "普通烤群友最多可储存次数",
+        "type": "int",
+        "default": 2
+    },
+    "resource_sync_enabled": {
+        "title": "启用云端资源同步",
+        "description": "开启后从云端 manifest 同步小猪资源",
+        "type": "bool",
+        "default": false
+    }
+}
