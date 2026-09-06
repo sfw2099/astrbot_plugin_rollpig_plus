@@ -1,5 +1,10 @@
 # 更新日志
 
+## v1.5.1 (2026-09-06)
+
+### 修复
+- 🐛 首次抽猪触发预约结算时报错 `async_generator can't be used in await`：`_deliver_reservations` 是 async generator，改用 `async for` 遍历
+
 ## v1.5.0 (2026-09-06)
 
 ### 新增

@@ -113,7 +113,8 @@ class RollPigPlugin(Star):
 
         # 首次抽猪后结算预约（若该用户有被预约）
         if resolution.was_auto_created:
-            await self._deliver_reservations(event, user_id, pig)
+            async for m in self._deliver_reservations(event, user_id, pig):
+                yield m
 
     async def _deliver_reservations(self, event: AstrMessageEvent, target_id: str, target_pig: dict):
         """目标抽猪后，结算针对他的预约烤猪（对所有参与者各烤一次）。"""
