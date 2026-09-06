@@ -7,10 +7,21 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
+
+
+# 去除 emoji（思源黑体/默认字体不支持，显示为豆腐块）
+_EMOJI_PATTERN = re.compile(
+    "[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\u202E\u3030\u303D]"
+)
+
+
+def _strip_emoji(text: str) -> str:
+    return _EMOJI_PATTERN.sub("", text)
 
 
 _FONT_DIR = None
@@ -120,20 +131,21 @@ def render_pig_card(pig_data: dict, image_path: Optional[Path], output_path: Pat
 
 
 def render_pigsty_summary(summary: str, user_name: str, output_path: Path) -> Path:
-    """渲染「我的猪圈」统计长图。summary 为多行文本。"""
+    """渲染「我的猪圈」统计长图。summary 为多行文本（渲染前去除 emoji）。"""
     width = 700
     pad = 30
     line_h = 48
     font = _load_font(30)
     title_font = _load_font(40, bold=True, title=True)
 
-    lines = summary.splitlines()
+    summary = _strip_emoji(summary)
+    lines = [ln for ln in summary.splitlines() if ln.strip()]
     height = pad * 2 + 70 + len(lines) * line_h
 
     img = Image.new("RGB", (width, height), (250, 250, 252))
     draw = ImageDraw.Draw(img)
 
-    draw.text((width // 2, 20), f"🐖 {user_name} 的猪圈", fill=(40, 40, 40), font=title_font, anchor="mt")
+    draw.text((width // 2, 20), f"猪圈主人：{_strip_emoji(user_name)}", fill=(40, 40, 40), font=title_font, anchor="mt")
 
     y = pad + 70
     for line in lines:

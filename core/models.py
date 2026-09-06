@@ -80,3 +80,32 @@ class DailyRollResult:
     def __iter__(self):
         yield self.pig_id
         yield self.created
+
+
+@dataclass(frozen=True)
+class CooldownConsumeResult:
+    allowed: bool
+    remaining_seconds: int = 0
+    charges_left: int = 0
+    max_charges: int = 1
+    next_recover_seconds: int = 0
+
+
+@dataclass(frozen=True)
+class RoastEvent:
+    event_type: str
+    attacker_id: str
+    target_id: str
+    attacker_name: str = ""
+    target_name: str = ""
+    food: str = ""
+    group_id: str = ""
+    reservation_id: str = ""
+    participant_ids: tuple[str, ...] = ()
+    participant_names: tuple[str, ...] = ()
+    participant_count: int = 0
+    backfire_victim_id: str = ""
+    backfire_victim_name: str = ""
+    special_reason: str = ""
+    event_id: str = ""
+    created_at: str = ""

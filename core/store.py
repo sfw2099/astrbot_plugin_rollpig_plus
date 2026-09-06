@@ -19,6 +19,8 @@ from .models import (
     DrawState,
     PigProgress,
     expert_level_from_copies,
+    CooldownConsumeResult,
+    RoastEvent,
 )
 
 
@@ -163,6 +165,88 @@ class LocalStore:
                 if daily:
                     result[uid] = daily[max(daily.keys())]
         return result
+
+    # ================= 烤猪 =================
+
+    def consume_roast_cooldown(
+        self,
+        user_id: str,
+        now_ts: Optional[float] = None,
+        cooldown_seconds: Optional[int] = None,
+        max_charges: Optional[int] = None,
+    ) -> CooldownConsumeResult:
+        """消耗一次烤猪充能；不足时返回剩余冷却时间。"""
+        import time
+        now = now_ts or time.time()
+        cooldown_seconds = int(cooldown_seconds or 8 * 3600)
+        max_charges = int(max_charges or 2)
+        with self._lock:
+            self._load()
+            u = self._user(user_id)
+            roast = u.setdefault("roast", {})
+            charges = int(roast.get("charges", max_charges))
+            next_recover = float(roast.get("next_recover", 0))
+            if charges <= 0:
+                # 恢复充能（按冷却时间恢复 1 次）
+                if now >= next_recover:
+                    charges = 1
+                    next_recover = now + cooldown_seconds
+                else:
+                    remaining = int(next_recover - now)
+                    return CooldownConsumeResult(
+                        allowed=False, remaining_seconds=remaining,
+                        charges_left=0, max_charges=max_charges,
+                        next_recover_seconds=remaining,
+                    )
+            else:
+                charges -= 1
+                if charges == max_charges - 1:
+                    next_recover = now + cooldown_seconds
+            roast["charges"] = charges
+            roast["next_recover"] = next_recover
+            self._save()
+            return CooldownConsumeResult(
+                allowed=True, charges_left=charges, max_charges=max_charges,
+            )
+
+    def consume_force_usage(self, user_id: str, date_str: Optional[str] = None) -> bool:
+        """消耗每日一次的「加急生火」；当天已用则返回 False。"""
+        import datetime
+        if not date_str:
+            date_str = datetime.date.today().isoformat()
+        with self._lock:
+            self._load()
+            u = self._user(user_id)
+            force = u.setdefault("force", {})
+            if force.get("date") == date_str:
+                return False
+            force["date"] = date_str
+            self._save()
+            return True
+
+    def append_roast_event(self, event: RoastEvent) -> None:
+        """记录一次烤猪事件（供日报/统计）。"""
+        import datetime
+        import uuid
+        with self._lock:
+            self._load()
+            events = self._data.setdefault("events", [])
+            events.append({
+                "event_type": event.event_type,
+                "attacker_id": event.attacker_id,
+                "target_id": event.target_id,
+                "attacker_name": event.attacker_name,
+                "target_name": event.target_name,
+                "food": event.food,
+                "group_id": event.group_id,
+                "event_id": event.event_id or str(uuid.uuid4()),
+                "created_at": event.created_at or datetime.datetime.now().isoformat(timespec="seconds"),
+            })
+            self._save()
+
+    def get_pig_by_date(self, user_id: str, date_str: str) -> Optional[str]:
+        self._load()
+        return self._user(user_id)["daily"].get(date_str)
 
 
 # 单例，由 main.py 在插件初始化时设置

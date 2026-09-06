@@ -16,5 +16,11 @@
         "description": "开启后从云端 manifest 同步小猪资源",
         "type": "bool",
         "default": false
+    },
+    "roast_ai_enabled": {
+        "title": "启用 AI 烤猪文案",
+        "description": "开启后使用 AstrBot 当前模型生成烤猪文案，失败时回退内置文案",
+        "type": "bool",
+        "default": false
     }
 }
