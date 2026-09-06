@@ -1,6 +1,6 @@
 name: astrbot_plugin_rollpig_plus
 display_name: 今日小猪 Plus
 desc: 每天抽一只属于你的小猪，慢慢养成自己的猪圈；支持图鉴成长、EX Lv.、烤群友、预约烤猪、小猪日报等功能
-version: v1.2.0
+version: v1.3.0
 author: ALin
 repo: https://github.com/sfw2099/astrbot_plugin_rollpig_plus
