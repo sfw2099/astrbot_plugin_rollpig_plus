@@ -19,6 +19,7 @@ from .core.roll_flow import (
     RECORDED_PIG_RESOURCE_MISSING_TEXT,
 )
 from .core.card_renderer import render_pig_card, render_pigsty_summary, _init_font_dir
+from .core.catalog_renderer import render_catalog, render_weekly_summary
 from .core.roast_flow import (
     build_self_roast,
     build_member_roast,
@@ -269,6 +270,53 @@ class RollPigPlugin(Star):
             ))
         async for m in self._roast_card(event, outcome.render_data, outcome.extra_text):
             yield m
+
+    @filter.command("小猪图鉴")
+    async def catalog(self, event: AstrMessageEvent):
+        """生成图片版收藏图鉴"""
+        uid = self._uid(event)
+        draw_state = store_mod.store.get_draw_state(uid)
+        items = []
+        for pig_id in draw_state.pig_ids:
+            pig = self.resource_manager.pig_map.get(pig_id)
+            if not pig:
+                continue
+            items.append({
+                "pig": pig,
+                "name": pig.get("name", pig_id),
+                "ex_level": draw_state.expert_level_of(pig_id),
+                "image_path": str(self.resource_manager.image_path(pig_id) or ""),
+            })
+        if not items:
+            yield event.plain_result("你还没有收藏任何小猪，先发送「今日小猪」吧！")
+            return
+        img_path = self.plugin_data_dir / f"rollpig_catalog_{uid}.png"
+        render_catalog(items, img_path)
+        yield event.image_result(str(img_path))
+
+    @filter.command("本周小猪")
+    async def weekly_summary(self, event: AstrMessageEvent):
+        """生成本周猪猪总结长图"""
+        uid = self._uid(event)
+        import datetime
+        today = datetime.date.today()
+        week_start = (today - datetime.timedelta(days=6)).isoformat()
+        rolls = store_mod.store.get_user_rolls(uid, week_start)
+        draw_state = store_mod.store.get_draw_state(uid)
+        items = []
+        for date_str, pig_id in sorted(rolls.items()):
+            pig = self.resource_manager.pig_map.get(pig_id)
+            if not pig:
+                continue
+            items.append({
+                "date": date_str,
+                "pig": pig,
+                "name": pig.get("name", pig_id),
+                "ex_level": draw_state.expert_level_of(pig_id),
+            })
+        img_path = self.plugin_data_dir / f"rollpig_week_{uid}.png"
+        render_weekly_summary(self._uname(event), items, img_path)
+        yield event.image_result(str(img_path))
 
     async def terminate(self):
         logger.info("今日小猪 Plus 插件已卸载")

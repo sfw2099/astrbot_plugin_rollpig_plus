@@ -244,9 +244,12 @@ class LocalStore:
             })
             self._save()
 
-    def get_pig_by_date(self, user_id: str, date_str: str) -> Optional[str]:
+    def get_user_rolls(self, user_id: str, start_date: Optional[str] = None) -> dict[str, str]:
+        """返回某用户从 start_date 起的 {date_str: pig_id}（按日期升序）。"""
         self._load()
-        return self._user(user_id)["daily"].get(date_str)
+        daily = self._user(user_id)["daily"]
+        result = {d: p for d, p in daily.items() if not start_date or d >= start_date}
+        return dict(sorted(result.items()))
 
 
 # 单例，由 main.py 在插件初始化时设置
