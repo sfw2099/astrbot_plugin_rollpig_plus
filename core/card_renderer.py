@@ -1,19 +1,38 @@
 # -*- coding: utf-8 -*-
-"""小猪卡片渲染（精简版）：头像 + 名称 + 描述 + 性格分析。"""
+"""小猪卡片渲染（精简版）：头像 + 名称 + 描述 + 性格分析。
+
+内置思源黑体（SourceHanSansSC-Medium.otf）与 ZCOOL 快乐体，优先加载插件内置字体，
+确保 Docker/Linux 服务器也能正常显示中文。
+"""
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
 
-def _load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
-    candidates = [
+_FONT_DIR = None
+
+
+def _init_font_dir(resource_dir: Path) -> None:
+    global _FONT_DIR
+    _FONT_DIR = resource_dir / "fonts"
+
+
+def _load_font(size: int, *, bold: bool = False, title: bool = False) -> ImageFont.FreeTypeFont:
+    """按顺序尝试字体：内置思源黑体/ZCOOL → 系统字体 → 默认。
+
+    title=True 时优先用 ZCOOL 快乐体（标题风格）。
+    """
+    candidates = []
+    if _FONT_DIR is not None:
+        if title:
+            candidates.append(_FONT_DIR / "ZCOOLKuaiLe-Regular.ttf")
+        candidates.append(_FONT_DIR / "SourceHanSansSC-Medium.otf")
+    candidates += [
         "C:/Windows/Fonts/msyh.ttc",
-        "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/simhei.ttf",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -21,7 +40,7 @@ def _load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
     ]
     for path in candidates:
         try:
-            return ImageFont.truetype(path, size)
+            return ImageFont.truetype(str(path), size)
         except Exception:
             continue
     return ImageFont.load_default()
@@ -55,7 +74,6 @@ def render_pig_card(pig_data: dict, image_path: Optional[Path], output_path: Pat
     img = Image.new("RGB", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
-    pig_id = str(pig_data.get("id", ""))
     name = str(pig_data.get("name", "未知小猪"))
     desc = str(pig_data.get("description", "无描述"))
     analysis = str(pig_data.get("analysis", "无解析"))
@@ -77,8 +95,8 @@ def render_pig_card(pig_data: dict, image_path: Optional[Path], output_path: Pat
         draw.rectangle([avatar_x, avatar_y, avatar_x + avatar_size, avatar_y + avatar_size],
                        fill=(245, 245, 248), outline=(200, 200, 205), width=2)
 
-    # 名称
-    name_font = _load_font(54, bold=True)
+    # 名称（标题字体）
+    name_font = _load_font(54, bold=True, title=True)
     name_w = _text_width(draw, name, name_font)
     draw.text(((width - name_w) // 2, avatar_y + avatar_size + 30), name, fill=(0, 0, 0), font=name_font)
 
@@ -96,6 +114,31 @@ def render_pig_card(pig_data: dict, image_path: Optional[Path], output_path: Pat
     for i, line in enumerate(lines):
         lw = _text_width(draw, line, analysis_font)
         draw.text(((width - lw) // 2, start_y + i * line_h), line, fill=(51, 51, 51), font=analysis_font)
+
+    img.save(str(output_path), "PNG")
+    return output_path
+
+
+def render_pigsty_summary(summary: str, user_name: str, output_path: Path) -> Path:
+    """渲染「我的猪圈」统计长图。summary 为多行文本。"""
+    width = 700
+    pad = 30
+    line_h = 48
+    font = _load_font(30)
+    title_font = _load_font(40, bold=True, title=True)
+
+    lines = summary.splitlines()
+    height = pad * 2 + 70 + len(lines) * line_h
+
+    img = Image.new("RGB", (width, height), (250, 250, 252))
+    draw = ImageDraw.Draw(img)
+
+    draw.text((width // 2, 20), f"🐖 {user_name} 的猪圈", fill=(40, 40, 40), font=title_font, anchor="mt")
+
+    y = pad + 70
+    for line in lines:
+        draw.text((pad + 10, y), line, fill=(60, 60, 60), font=font)
+        y += line_h
 
     img.save(str(output_path), "PNG")
     return output_path

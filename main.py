@@ -18,7 +18,7 @@ from .core.roll_flow import (
     build_pigsty_growth_summary,
     RECORDED_PIG_RESOURCE_MISSING_TEXT,
 )
-from .core.card_renderer import render_pig_card
+from .core.card_renderer import render_pig_card, render_pigsty_summary, _init_font_dir
 
 
 @register("astrbot_plugin_rollpig_plus", "ALin", "今日小猪 Plus", "1.0.0")
@@ -33,6 +33,7 @@ class RollPigPlugin(Star):
 
         # 资源目录（随插件分发）
         self.resource_dir = Path(__file__).parent / "resource"
+        _init_font_dir(self.resource_dir)
 
         # 初始化 store 与资源管理器
         init_store(self.data_file)
@@ -92,7 +93,7 @@ class RollPigPlugin(Star):
 
     @filter.command("我的猪圈")
     async def my_pigsty(self, event: AstrMessageEvent):
-        """查看猪圈统计"""
+        """查看猪圈统计（图片渲染）"""
         user_id = self._uid(event)
         draw_state = store_mod.store.get_draw_state(user_id)
         total = len(self.resource_manager.pig_list)
@@ -100,7 +101,14 @@ class RollPigPlugin(Star):
             self._uname(event), draw_state, total,
             pig_name_of=lambda pid: self.resource_manager.pig_map.get(pid, {}).get("name", pid),
         )
-        yield event.plain_result(summary)
+        img_path = self.plugin_data_dir / f"rollpig_pigsty_{user_id}.png"
+        try:
+            render_pigsty_summary(summary, self._uname(event), img_path)
+        except Exception as e:
+            logger.error(f"[rollpig] 猪圈统计渲染失败: {e}")
+            yield event.plain_result(summary)
+            return
+        yield event.image_result(str(img_path))
 
     async def terminate(self):
         logger.info("今日小猪 Plus 插件已卸载")
