@@ -184,27 +184,29 @@ class RollPigPlugin(Star):
         return ""
 
     async def _get_group_members(self, event: AstrMessageEvent, group_id: str) -> list[str]:
-        """获取群成员 user_id 列表。"""
+        """获取群成员 user_id 列表（兼容直接 list / {data:[...]}）。"""
         try:
             info = await event.bot.api.call_action(
                 "get_group_member_list", group_id=int(group_id),
             )
-            data = info.get("data") if isinstance(info, dict) else info
-            if isinstance(data, list):
-                return [str(m.get("user_id")) for m in data if isinstance(m, dict) and m.get("user_id")]
+            if isinstance(info, dict) and "data" in info:
+                info = info["data"]
+            if isinstance(info, list):
+                return [str(m.get("user_id")) for m in info if isinstance(m, dict) and m.get("user_id")]
         except Exception:
             pass
         return []
 
     async def _get_group_member_name(self, event: AstrMessageEvent, group_id: str, user_id: str) -> str:
-        """获取群成员名片/昵称。"""
+        """获取群成员名片/昵称（兼容有/无 data 包装）。"""
         try:
             info = await event.bot.api.call_action(
                 "get_group_member_info", group_id=int(group_id), user_id=int(user_id),
             )
-            data = info.get("data") if isinstance(info, dict) else info
-            if isinstance(data, dict):
-                name = data.get("card") or data.get("nickname")
+            if isinstance(info, dict) and "data" in info:
+                info = info["data"]
+            if isinstance(info, dict):
+                name = info.get("card") or info.get("nickname")
                 if name:
                     return str(name)
             logger.warning(f"[rollpig] 获取群成员信息返回结构异常: group={group_id} user={user_id} info={info}")
@@ -244,6 +246,14 @@ class RollPigPlugin(Star):
         )
         if text:
             data["analysis"] = text
+        # 记录自己烤成
+        if group_id:
+            store_mod.store.append_roast_event(RoastEvent(
+                event_type="self_roast",
+                attacker_id=uid, target_id=uid,
+                attacker_name=self._uname(event), target_name=self._uname(event),
+                food=food, group_id=group_id,
+            ))
         async for m in self._roast_card(event, data):
             yield m
 
@@ -393,6 +403,39 @@ class RollPigPlugin(Star):
             return
         img_path = self.plugin_data_dir / f"rollpig_catalog_{uid}.png"
         render_catalog(items, img_path)
+        yield event.image_result(str(img_path))
+
+    @filter.command("烤成图鉴", alias={"我的烤成", "烤猪图鉴"})
+    async def roasted_catalog(self, event: AstrMessageEvent):
+        """生成图片版「被烤成料理」图鉴"""
+        uid = self._uid(event)
+        uname = self._uname(event)
+        roasted_names = store_mod.store.get_roasted(uid)
+        by_name = {}
+        for pid, pig in self.resource_manager.pig_map.items():
+            by_name.setdefault(pig.get("name", pid), pig)
+        items = []
+        seen = set()
+        for name in roasted_names:
+            pig = by_name.get(name)
+            if not pig:
+                continue
+            pid = str(pig.get("id", ""))
+            if pid in seen:
+                continue
+            seen.add(pid)
+            items.append({
+                "pig": pig,
+                "name": name,
+                "ex_level": 0,
+                "image_path": str(self.resource_manager.image_path(pid) or ""),
+            })
+        if not items:
+            yield event.plain_result(f"{uname} 还没有被烤成过料理。去烤烤自己或群友吧！（今日烤猪 / 烤群友）")
+            return
+        img_path = self.plugin_data_dir / f"rollpig_roasted_{uid}.png"
+        render_catalog(items, img_path)
+        yield event.plain_result(f"🍖 {uname} 被烤成过的料理（{len(items)} 种）：")
         yield event.image_result(str(img_path))
 
     @filter.command("本周小猪")

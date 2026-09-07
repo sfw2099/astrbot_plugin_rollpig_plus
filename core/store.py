@@ -50,6 +50,7 @@ class LocalStore:
         u.setdefault("daily", {})          # {date_str: pig_id}
         u.setdefault("collection", {})     # {pig_id: {copies, first_obtained_at}}
         u.setdefault("duplicate_streak", 0)
+        u.setdefault("roasted", [])        # 被烤成过的熟食 id 列表
         return u
 
     # ================= 每日抽取 =================
@@ -235,7 +236,7 @@ class LocalStore:
             return True
 
     def append_roast_event(self, event: RoastEvent) -> None:
-        """记录一次烤猪事件（供日报/统计）。"""
+        """记录一次烤猪事件（供日报/统计）；并给被烤成目标玩家记入「烤成图鉴」。"""
         import datetime
         import uuid
         with self._lock:
@@ -252,7 +253,18 @@ class LocalStore:
                 "event_id": event.event_id or str(uuid.uuid4()),
                 "created_at": event.created_at or datetime.datetime.now().isoformat(timespec="seconds"),
             })
+            # 被做成料理的形态记录到被烤成者（target）名下；仅目标真正被做成食物的成功类事件
+            record_types = {"success", "force_roast", "random_roast", "self_roast"}
+            if event.food and event.target_id and event.event_type in record_types:
+                target = self._user(event.target_id)
+                if event.food not in target["roasted"]:
+                    target["roasted"].append(event.food)
             self._save()
+
+    def get_roasted(self, user_id: str) -> list[str]:
+        """返回该玩家被烤成过的熟食 id 列表。"""
+        self._load()
+        return list(self._user(user_id).get("roasted", []))
 
     def get_user_rolls(self, user_id: str, start_date: Optional[str] = None) -> dict[str, str]:
         """返回某用户从 start_date 起的 {date_str: pig_id}（按日期升序）。"""
