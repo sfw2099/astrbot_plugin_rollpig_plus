@@ -58,10 +58,9 @@ class LocalStore:
         self._load()
         daily = self._user(user_id)["daily"]
         if not date_str:
-            # 无日期时取最近一天
-            if not daily:
-                return None
-            date_str = max(daily.keys())
+            # 无日期时按「今天」判断（跨天自然重置）
+            import datetime
+            date_str = datetime.date.today().isoformat()
         return daily.get(date_str)
 
     def get_or_create_daily_roll(
@@ -155,15 +154,15 @@ class LocalStore:
 
     def get_daily_rolls(self, date_str: Optional[str] = None) -> dict[str, str]:
         self._load()
+        if not date_str:
+            # 无日期时按「今天」
+            import datetime
+            date_str = datetime.date.today().isoformat()
         result = {}
         for uid, u in self._data.get("users", {}).items():
             daily = u.get("daily", {})
-            if date_str:
-                if date_str in daily:
-                    result[uid] = daily[date_str]
-            else:
-                if daily:
-                    result[uid] = daily[max(daily.keys())]
+            if date_str in daily:
+                result[uid] = daily[date_str]
         return result
 
     # ================= 烤猪 =================
